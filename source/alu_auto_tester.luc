@@ -1,0 +1,439 @@
+module alu_auto_tester #(
+    CLK_FREQ = 1000 : CLK_FREQ > 0
+)(
+    input clk,  // clock
+    input rst,  // reset
+    input io_button[5],
+    output led[8],
+    output io_led[3][8],
+    output io_segment[8],
+    output io_select[4]
+) {
+    alu alu_inst;// Instantiate ALU
+    
+    enum States {
+        INIT, // Auto tester begins
+        IDLE, // Initial State, press button to start
+        TEST, // Testing
+        CHECK, // Check with expected output
+        RESULT, // Display output
+        DONE // End of auto testing
+    }
+    
+    sig slow_clock
+    
+    const SEVEN_SEG_DIV = $is_sim() ? 3 : 16 
+    const SLOW_CLOCK_DEFAULT_SPEED = $is_sim() ? 8 : 28 
+    
+    .clk(clk) {
+        edge_detector slow_clock_edge(#RISE(1), #FALL(0))
+        
+        // Instantiate 5 edge detectors, one for each button 
+        edge_detector io_button_edge[5](#RISE(5x{{1}}), #FALL(5x{{0}}))
+        // Instantiate 5 conditioners, one for each button
+        button_conditioner io_button_cond[5](#CLK_FREQ(5x{{1000}})) 
+        
+        .rst(rst) {
+            multi_seven_seg seg(#DIV(SEVEN_SEG_DIV)) 
+            dff slow_clock_enable(#INIT(0))
+            dff counter[32]
+            dff speed_pointer[$clog2(32)](#INIT(SLOW_CLOCK_DEFAULT_SPEED))
+            dff state[$clog2(8)](#INIT(States.IDLE));
+            dff a[32](#INIT(0));
+            dff b[32](#INIT(0));
+            dff alufn[6](#INIT(0));
+            dff expected[32](#INIT(0));
+            dff test_pass[1](#INIT(1));
+            dff test_num[8](#INIT(0));
+            dff test_failed[8](#INIT(0));
+            dff current_test_pass[1](#INIT(1));
+            dff current_op[8](#INIT(0));
+        }
+    }
+    
+    const OP_ADD = 8d0;
+    const OP_SUB = 8d1;
+    const OP_MUL = 8d2;
+    const OP_AND = 8d3;
+    const OP_OR = 8d4;
+    const OP_XOR = 8d5;
+    const OP_LDR = 8d6;
+    const OP_SHL = 8d7;
+    const OP_SHR = 8d8;
+    const OP_SRA = 8d9;
+    const OP_CMPEQ = 8d10;
+    const OP_CMPLT = 8d11;
+    const OP_CMPLE = 8d12;
+    
+    bin_to_dec decimal_renderer(#DIGITS(4), #LEADING_ZEROS(1)) // Instantiate binary to decimal converter
+    
+    always {
+        decimal_renderer.value = test_num.q // Convert the binary value of case number into decimal value
+        seg.values = decimal_renderer.digits // Plug the decimal digits into 7seg controller
+        
+        // Connect buttons and ensure only inputs at rising edge is taken
+        io_button_cond.in = io_button
+        io_button_edge.in =  io_button_cond.out
+        
+        // Connect dffs
+        state.d = state.q;
+        a.d = a.q;
+        b.d = b.q;
+        alufn.d = alufn.q;
+        expected.d = expected.q;
+        test_pass.d = test_pass.q;
+        
+        test_num.d = test_num.q;
+        test_failed.d = test_failed.q;
+        current_test_pass.d = current_test_pass.q;
+        current_op.d = current_op.q;
+        
+        slow_clock = counter.q[speed_pointer.q]
+        counter.d = counter.q + 1;
+        speed_pointer.d = speed_pointer.q
+        
+        // Connect ALU
+        alu_inst.a = a.q;
+        alu_inst.b = b.q;
+        alu_inst.alufn = alufn.q;
+        
+        // Initialize outputs
+        led = 8h00;
+        io_led = 3x{{8h00}};
+        io_segment = 8h00;
+        io_select = 4hF;
+        
+        slow_clock_enable.d = slow_clock_enable.q
+        
+        case (slow_clock_enable.q){
+            0:
+                slow_clock_edge.in =  0
+            1:
+                slow_clock_edge.in = slow_clock
+            default:
+                slow_clock_edge.in = 0
+        }
+        
+        case(state.q) {
+            States.IDLE:
+                if(io_button_edge.out[1]){
+                    if(~|slow_clock_enable.q)
+                        state.d = States.INIT
+                    }
+            
+                
+            States.INIT:
+                test_pass.d = 1;
+                test_num.d = 0;
+                test_failed.d = 0;
+                slow_clock_enable.d = 1
+                
+                current_op.d = OP_ADD;
+            if (slow_clock_edge.out){
+                   state.d = States.TEST; 
+                }
+                
+                
+                
+            States.TEST:
+                
+                current_test_pass.d = 1;
+                
+                
+                case(test_num.q) {
+                    // ADD tests (0x00)
+                    8d0: // Zero Addition: A + 0
+                        a.d = 32h0000000A;
+                        b.d = 32h00000000;
+                        alufn.d = 6b000000;
+                        expected.d = 32h0000000A;
+                        current_op.d = OP_ADD;
+                        
+                    8d1: // Zero Addition: 0 + A
+                        a.d = 32h00000000;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b000000;
+                        expected.d = 32h0000000A;
+                        current_op.d = OP_ADD;
+                        
+                    8d2: // Positive Numbers: Add two positive numbers
+                        a.d = 32h00000014; // 20
+                        b.d = 32h0000002D; // 45
+                        alufn.d = 6b000000;
+                        expected.d = 32h00000041; // 65
+                        current_op.d = OP_ADD;
+                        
+                    8d3: // Boundary Values: Add max positive number to itself (will overflow)
+                        a.d = 32h7FFFFFFF;
+                        b.d = 32h7FFFFFFF;
+                        alufn.d = 6b000000;
+                        expected.d = 32hFFFFFFFE; // -2 in two's complement
+                        current_op.d = OP_ADD;
+                        
+                    // SUB tests (0x01)
+                    8d4: // Zero Subtraction: A - 0
+                        a.d = 32h0000000A;
+                        b.d = 32h00000000;
+                        alufn.d = 6b000001;
+                        expected.d = 32h0000000A;
+                        current_op.d = OP_SUB;
+                        
+                    8d5: // Zero Subtraction: 0 - A
+                        a.d = 32h00000000;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b000001;
+                        expected.d = 32hFFFFFFF6; // -10 in two's complement
+                        current_op.d = OP_SUB;
+                        
+                    8d6: // Underflow: Subtract larger from smaller
+                        a.d = 32h00000005;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b000001;
+                        expected.d = 32hFFFFFFFB; // -5 in two's complement
+                        current_op.d = OP_SUB;
+                        
+                    // MUL tests (0x02)
+                    8d7: // Zero Multiplication: A * 0
+                        a.d = 32h0000000A;
+                        b.d = 32h00000000;
+                        alufn.d = 6b000010;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_MUL;
+                        
+                    8d8: // Multiplication by One: A * 1
+                        a.d = 32h0000000A;
+                        b.d = 32h00000001;
+                        alufn.d = 6b000010;
+                        expected.d = 32h0000000A;
+                        current_op.d = OP_MUL;
+                        
+                    8d9: // Positive Numbers: Multiply two positive numbers
+                        a.d = 32h00000005;
+                        b.d = 32h00000003;
+                        alufn.d = 6b000010;
+                        expected.d = 32h0000000F; // 15
+                        current_op.d = OP_MUL;
+                        
+                    // AND tests (0x18)
+                    8d10: // All Zeros: A AND 0
+                        a.d = 32h0000FFFF;
+                        b.d = 32h00000000;
+                        alufn.d = 6b011000;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_AND;
+                        
+                    8d11: // All Ones: A AND 0xFFFFFFFF
+                        a.d = 32h0000FFFF;
+                        b.d = 32hFFFFFFFF;
+                        alufn.d = 6b011000;
+                        expected.d = 32h0000FFFF;
+                        current_op.d = OP_AND;
+                        
+                    8d12: // Identity Check: A AND A
+                        a.d = 32h0000FFFF;
+                        b.d = 32h0000FFFF;
+                        alufn.d = 6b011000;
+                        expected.d = 32h0000FFFF;
+                        current_op.d = OP_AND;
+                        
+                    // OR tests (0x1E)
+                    8d13: // All Zeros: A OR 0
+                        a.d = 32h0000FFFF;
+                        b.d = 32h00000000;
+                        alufn.d = 6b011110;
+                        expected.d = 32h0000FFFF;
+                        current_op.d = OP_OR;
+                        
+                    8d14: // All Ones: A OR 0xFFFFFFFF
+                        a.d = 32h0000FFFF;
+                        b.d = 32hFFFFFFFF;
+                        alufn.d = 6b011110;
+                        expected.d = 32hFFFFFFFF;
+                        current_op.d = OP_OR;
+                        
+                    // XOR tests (0x16)
+                    8d15: // A XOR 0
+                        a.d = 32h0000FFFF;
+                        b.d = 32h00000000;
+                        alufn.d = 6b010110;
+                        expected.d = 32h0000FFFF;
+                        current_op.d = OP_XOR;
+                        
+                    8d16: // A XOR A
+                        a.d = 32h0000FFFF;
+                        b.d = 32h0000FFFF;
+                        alufn.d = 6b010110;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_XOR;
+                        
+                    // "A" (LDR) tests (0x1A)
+                    8d17: // Load Function
+                        a.d = 32h0000FFFF;
+                        b.d = 32h00000000;
+                        alufn.d = 6b011010;
+                        expected.d = 32h0000FFFF;
+                        current_op.d = OP_LDR;
+                        // SHL tests (0x20)
+                    8d18: // Zero Shift
+                        a.d = 32h00000555;
+                        b.d = 32h00000000;
+                        alufn.d = 6b100000;
+                        expected.d = 32h00000555;
+                        current_op.d = OP_SHL;
+                        
+                    8d19: // Shift by 4
+                        a.d = 32h00000005;
+                        b.d = 32h00000004;
+                        alufn.d = 6b100000;
+                        expected.d = 32h00000050;
+                        current_op.d = OP_SHL;
+                        
+                    // SHR tests (0x21)
+                    8d20: // Zero Shift
+                        a.d = 32h00000555;
+                        b.d = 32h00000000;
+                        alufn.d = 6b100001;
+                        expected.d = 32h00000555;
+                        current_op.d = OP_SHR;
+                        
+                    8d21: // Shift by 4
+                        a.d = 32h00000050;
+                        b.d = 32h00000004;
+                        alufn.d = 6b100001;
+                        expected.d = 32h00000005;
+                        current_op.d = OP_SHR;
+                        
+                    // SRA tests (0x23)
+                    8d22: // Shift positive number
+                        a.d = 32h00000050;
+                        b.d = 32h00000004;
+                        alufn.d = 6b100011;
+                        expected.d = 32h00000005;
+                        current_op.d = OP_SRA;
+                        
+                    8d23: // Shift negative number
+                        a.d = 32hF0000000;
+                        b.d = 32h00000004;
+                        alufn.d = 6b100011;
+                        expected.d = 32hFF000000;
+                        current_op.d = OP_SRA;
+                        
+                    // CMPEQ tests (0x33)
+                    8d24: // Equality
+                        a.d = 32h0000000A;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b110011;
+                        expected.d = 32h00000001;
+                        current_op.d = OP_CMPEQ;
+                        
+                    8d25: // Inequality
+                        a.d = 32h0000000A;
+                        b.d = 32h0000000B;
+                        alufn.d = 6b110011;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_CMPEQ;
+                        
+                    // CMPLT tests (0x35)
+                    8d26: // Less Than
+                        a.d = 32h00000005;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b110101;
+                        expected.d = 32h00000001;
+                        current_op.d = OP_CMPLT;
+                        
+                    8d27: // Greater Than
+                        a.d = 32h0000000A;
+                        b.d = 32h00000005;
+                        alufn.d = 6b110101;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_CMPLT;
+                        
+                    // CMPLE tests (0x37)
+                    8d28: // Less Than
+                        a.d = 32h00000005;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b110111;
+                        expected.d = 32h00000001;
+                        current_op.d = OP_CMPLE;
+                        
+                    8d29: // Equal To
+                        a.d = 32h0000000A;
+                        b.d = 32h0000000A;
+                        alufn.d = 6b110111;
+                        expected.d = 32h00000001;
+                        current_op.d = OP_CMPLE;
+                        
+                    8d30: // Greater Than
+                        a.d = 32h0000000A;
+                        b.d = 32h00000005;
+                        alufn.d = 6b110111;
+                        expected.d = 32h00000000;
+                        current_op.d = OP_CMPLE;
+                    8d31: // Done with all tests
+                        state.d = States.DONE;
+                }
+                
+                if (test_num.q < 31) {
+                    slow_clock_enable.d = 1
+                    state.d = States.CHECK;
+                }
+                
+            States.CHECK:
+                if (slow_clock_edge.out) {
+                    if (alu_inst.out != expected.q) { // Check if alu output matches expected output
+                        current_test_pass.d = 0;
+                        test_pass.d = 0;
+                        test_failed.d = test_failed.q | (1 << test_num.q[2:0]);
+                    }
+                    counter.d = 0;
+                    state.d = States.RESULT;
+                }
+                
+            States.RESULT:
+                // Display the current test result
+                if (current_test_pass.q) {
+                    led = alu_inst.out[7:0]    
+                    io_led[0] = alu_inst.out[15:8];
+                    io_led[1] = alu_inst.out[23:16];
+                    io_led[2] = alu_inst.out[31:24]
+                } else {
+                    io_led[0] = 8h00; // All LEDs off for fail
+                }
+                
+                // Display the current test number
+                //io_led[1] = test_num.q;
+                
+                // Display the current operation
+                //io_led[2] = current_op.q;
+                
+                if (slow_clock_edge.out) {
+                    test_num.d = test_num.q + 1;
+                    counter.d = 0;
+                    state.d = States.TEST;
+                }
+                
+            States.DONE:
+                // Show overall test result
+                led = test_pass.q ? 8hFF : 8h00; // All LEDs on for overall pass, off for fail
+                
+                // Display which tests failed
+                io_led[0] = test_failed.q;
+                
+                // Display current ALU output on second row
+                io_led[1] = alu_inst.out[7:0];
+                
+                // Display expected output on third row
+                io_led[2] = expected.q[7:0];
+                
+                // Go back to the IDLE state
+                slow_clock_enable.d = 0
+                if(io_button_edge.out[1]){
+                    state.d = States.IDLE
+                    }
+        }
+        
+        
+        io_segment = ~seg.seg
+        io_select = ~seg.sel
+    }
+}

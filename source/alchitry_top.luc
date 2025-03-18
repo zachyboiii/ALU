@@ -12,29 +12,79 @@ module alchitry_top (
 ) {
     
     sig rst                 // reset signal
+    enum States{
+        IDLE, // Initial State
+        MANUAL, // Runs manual tester
+        AUTO // Runs auto tester
+    }
     
     .clk(clk) {
         // The reset conditioner is used to synchronize the reset signal to the FPGA
         // clock. This ensures the entire FPGA comes out of reset at the same time.
         reset_conditioner reset_cond
+        // Instantiate 5 edge detectors, one for each button 
+        edge_detector io_button_edge[5](#RISE(5x{{1}}), #FALL(5x{{0}}))
+        // Instantiate 5 conditioners, one for each button
+        button_conditioner io_button_cond[5](#CLK_FREQ(5x{{1000}})) 
+        
+        .rst(rst) {
+            dff states[$width(States)](#INIT(States.IDLE)) // Each state has a dff, set initial state to idle
+        }
     }
-    const CLK_FREQ = $is_sim() ? 1000 : 10000000 // put 1000 for sim, 10000000 otherwise in hardware
+    const CLK_FREQ = $is_sim() ? 1000 : 100000000 // Put 1000 for sim, 10000000 otherwise in hardware
     
     alu_manual_tester alu_manual(.clk(clk), .rst(rst), .io_button(io_button), .io_dip(io_dip), #CLK_FREQ(CLK_FREQ)) 
+    alu_auto_tester alu_auto(.clk(clk), .rst(rst), .io_button(io_button), #CLK_FREQ(CLK_FREQ))
     
     always {
-        reset_cond.in = ~rst_n  // input raw inverted reset signal
-        rst = reset_cond.out    // conditioned reset
+        reset_cond.in = ~rst_n  // Input raw inverted reset signal
+        rst = reset_cond.out    // Conditioned reset
+      
+        // Connect buttons and ensure only inputs at rising edge is taken
+        io_button_cond.in = io_button
+        io_button_edge.in =  io_button_cond.out
         
-        led = 8h00             // turn LEDs off
+        // Default settings
+        led = 8h00             
+        io_segment = 8b0
+        io_select = 4b0
+        io_led = 3x{{8b0}}
         
-        usb_tx = usb_rx          // loop serial port
+        // Loop serial port
+        usb_tx = usb_rx          
         
-
-        // to test ALU 
-        io_segment = alu_manual.io_segment
-        io_select = alu_manual.io_select         
-        io_led = alu_manual.io_led
-        led = alu_manual.led
+        // Connect dffs
+        states.d = states.q
+        
+        case(states.q){
+            States.IDLE: // Checks io button 3 and 4 to decide which tester to run
+            if(io_button_edge.out[3]){
+                states.d = States.MANUAL
+            } else if(io_button_edge.out[4]){
+                states.d = States.AUTO
+            }
+            
+            States.MANUAL:
+                // Manual ALU Tester (Take manual tester outputs)
+                io_segment = alu_manual.io_segment
+                io_select = alu_manual.io_select         
+                io_led = alu_manual.io_led
+                led = alu_manual.led
+                if(io_button_edge.out[3]){ // Go back to IDLE (If changing tester)
+                    states.d = States.IDLE
+                }
+            
+            States.AUTO:
+                // Auto ALU Tester (Take auto tester outputs)
+                io_segment = alu_auto.io_segment
+                io_select = alu_auto.io_select         
+                io_led = alu_auto.io_led
+                led = alu_auto.led
+                if(io_button_edge.out[4]){ // Go back to IDLE (If changing tester)
+                    states.d = States.IDLE
+                }
+                
+        }
+        
     }
 }

@@ -13,21 +13,20 @@ module alu_manual_tester#(
     
     alu alu
     enum States {
-        IDLE,
-        LOWER_A,
-        UPPER_A,
-        LOWER_B,
-        UPPER_B
+        IDLE, // Initial State
+        LOWER_A, // Check first 16 bits of alu.a
+        UPPER_A, // Check last 16 bits of alu.a
+        LOWER_B, // Check first 16 bits of alu.b
+        UPPER_B // Check last 16 bits of alu.b
     }
     
     const SEVEN_SEG_DIV = $is_sim() ? 3 : 16
    .clk(clk) {
-        // The reset conditioner is used to synchronize the reset signal to the FPGA
-        // clock. This ensures the entire FPGA comes out of reset at the same time.
         
-        // instantiate 5 edge detectors, one for each button 
+        
+        // Instantiate 5 edge detectors, one for each button 
         edge_detector io_button_edge[5](#RISE(5x{{1}}), #FALL(5x{{0}}))
-        // instantiate 5 conditioners, one for each button
+        // Instantiate 5 conditioners, one for each button
         button_conditioner io_button_cond[5](#CLK_FREQ(5x{{1000}})) 
         
         
@@ -41,23 +40,24 @@ module alu_manual_tester#(
     
     
     always {    
+        // Set first 3 digits of 7 segment to show values of z, v and n respectively
         seg.values = {c{3b0,alu.z},c{3b0,alu.v},c{3b0,alu.n},4b0}
         
-        // connect buttons and ensure only inputs at rising edge is taken
+        // Connect buttons and ensure only inputs at rising edge is taken
         io_button_cond.in = io_button
         io_button_edge.in =  io_button_cond.out
         
-        // connect dffs
+        // Connect dffs
         states.d = states.q
         a.d = a.q
         b.d = b.q
         
         
-        // initialise a and b
+        // Initialise a and b
         alu.a =  a.q
         alu.b = b.q
         
-        // leftmost section of IO dip switches, from right to left
+        // Leftmost section of IO dip switches, from right to left
         alu.alufn = io_dip[2][5:0]
         
         // leds above dip switches
@@ -69,7 +69,7 @@ module alu_manual_tester#(
         // 4 sections of 7 segment leds
         io_select = 4hF
         
-        // tester logic:
+        // Tester logic:
         led = alu.out[7:0]
         io_led[0] = alu.out[15:8]
         io_led[1] = alu.out[23:16]
@@ -78,21 +78,17 @@ module alu_manual_tester#(
         
         case(states.q){
             States.IDLE:
-                if (io_button_edge.out[0]){
-                states.d = States.UPPER_A
-                } else if(io_button_edge.out[2]){
+                if (io_button_edge.out[0]){ // io_button[0] for reading bits of a
                 states.d = States.LOWER_A
-                } else if(io_button_edge.out[3]){
-                states.d = States.UPPER_B
-                } else if(io_button_edge.out[4]){
+                } else if(io_button_edge.out[2]){ //  io_button[2] for reading bits of b
                 states.d = States.LOWER_B
-                }
+                } 
     
             States.LOWER_A:
                 a.d[7:0] = io_dip[0]
                 a.d[15:8] = io_dip[1]
                 if (io_button_edge.out[1]){
-                states.d = States.IDLE
+                states.d = States.UPPER_A // Move to States.UPPER_A to read next 16 bits of A
                 }
             States.UPPER_A:
                 a.d[23:16] = io_dip[0] // Read back 8 bits
@@ -104,7 +100,7 @@ module alu_manual_tester#(
                 b.d[7:0] = io_dip[0] // Read back 8 bits
                 b.d[15:8] = io_dip[1] // Read front 8 bits
                 if (io_button_edge.out[1]) {
-                    states.d = States.IDLE  // move to States.B2
+                    states.d = States.UPPER_B  // Move to States.UPPER_B to read next 16 bits of B
                 }
             States.UPPER_B:
                 b.d[23:16] = io_dip[0] // Read back 8 bits
