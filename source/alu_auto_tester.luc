@@ -381,7 +381,7 @@ module alu_auto_tester #(
                         b.d = 32h00000003;
                         alufn.d = 6b000010;
                         expected.d = 32h00000005;
-                        current_op.d = OP_MUL;
+                        current_op.d = OP_DIV;
                     8d33: // Done with all tests
                         state.d = States.DONE;
                 }
