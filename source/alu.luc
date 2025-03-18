@@ -13,6 +13,7 @@ module alu (
     boolean boolean
     shifter shifter
     multiplier multiplier
+    divider divider
     
     always {
         // implement alu logic here
@@ -41,6 +42,10 @@ module alu (
         multiplier.a = a
         multiplier.b = b
         
+        // divider
+        divider.a = a
+        divider.b = b
+        
         case(alufn){
             b000000:
                 z = adder.z;
@@ -57,6 +62,11 @@ module alu (
                 v = 0
                 n = 0
                 out = multiplier.mul
+            b000011:
+                z = 0
+                v = 0
+                n = 0
+                out = divider.d
             b011000:
                 z = 0
                 v = 0

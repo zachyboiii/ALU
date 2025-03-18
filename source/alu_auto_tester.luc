@@ -64,6 +64,7 @@ module alu_auto_tester #(
     const OP_CMPEQ = 8d10;
     const OP_CMPLT = 8d11;
     const OP_CMPLE = 8d12;
+    const OP_DIV = 8d13
     
     bin_to_dec decimal_renderer(#DIGITS(4), #LEADING_ZEROS(1)) // Instantiate binary to decimal converter
     
@@ -369,11 +370,23 @@ module alu_auto_tester #(
                         alufn.d = 6b110111;
                         expected.d = 32h00000000;
                         current_op.d = OP_CMPLE;
-                    8d31: // Done with all tests
+                    8d31: // Divide by 1
+                        a.d = 32h0000000A;
+                        b.d = 32h00000001;
+                        alufn.d = 6b000011;
+                        expected.d = 32h0000000A;
+                        current_op.d = OP_DIV;
+                    8d32: // 15 Divide by 3
+                        a.d = 32h0000000F; // 15
+                        b.d = 32h00000003;
+                        alufn.d = 6b000010;
+                        expected.d = 32h00000005;
+                        current_op.d = OP_MUL;
+                    8d33: // Done with all tests
                         state.d = States.DONE;
                 }
                 
-                if (test_num.q < 31) {
+                if (test_num.q < 33) {
                     slow_clock_enable.d = 1
                     state.d = States.CHECK;
                 }
