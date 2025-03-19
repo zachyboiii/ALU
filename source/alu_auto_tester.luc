@@ -427,16 +427,12 @@ module alu_auto_tester #(
                 
             States.DONE:
                 // Show overall test result
-                led = test_pass.q ? 8hFF : 8h00; // All LEDs on for overall pass, off for fail
+                // All LEDs on for overall pass, off for fail
+                led = test_pass.q ? 8hFF : 8h00;
+                io_led[0] = test_pass.q ? 8hFF : 8h00; 
+                io_led[1] = test_pass.q ? 8hFF : 8h00;
+                io_led[2] = test_pass.q ? 8hFF : 8h00;
                 
-                // Display which tests failed
-                io_led[0] = test_failed.q;
-                
-                // Display current ALU output on second row
-                io_led[1] = alu_inst.out[7:0];
-                
-                // Display expected output on third row
-                io_led[2] = expected.q[7:0];
                 
                 // Go back to the IDLE state
                 slow_clock_enable.d = 0
